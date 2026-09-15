@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Match 3 Playable Ad</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0f172a;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        /* Header Stats Bar */
+        #header {
+            width: 100%;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(30, 41, 59, 0.8);
+            color: #ffffff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+        .stat-box {
+            text-align: center;
+        }
+        .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #94a3b8;
+            letter-spacing: 1px;
+        }
+        .stat-value {
+            font-size: 22px;
+            font-weight: 800;
+            color: #38bdf8;
+        }
+
+        /* Instructions Banner */
+        #banner {
+            background: #eab308;
+            color: #000;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 6px 16px;
+            border-radius: 20px;
+            margin-top: 10px;
+            text-align: center;
+            box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Game Board Canvas */
+        #game-container {
+            position: relative;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+        canvas {
+            background: #1e293b;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            touch-action: none;
+        }
+
+        /* Floating Endcard CTA */
+        #end-card {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.92);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        #end-card.active {
+            display: flex;
+            opacity: 1;
+        }
+        .cta-title {
+            color: #fff;
+            font-size: 28px;
+            font-weight: 900;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+        .cta-subtitle {
+            color: #94a3b8;
+            font-size: 14px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+        .cta-btn {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: white;
+            font-size: 20px;
+            font-weight: 800;
+            padding: 16px 40px;
+            border-radius: 50px;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(34, 197, 94, 0.4);
+            animation: bounce 1.2s infinite alternate;
+            text-decoration: none;
+            text-transform: uppercase;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-8px); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div class="stat-box">
+            <div class="stat-label">Moves Left</div>
+            <div class="stat-value" id="moves-text">7</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Score</div>
+            <div class="stat-value" id="score-text">0</div>
+        </div>
+    </div>
+
+    <div id="banner">Match 4 = 💣 Grenade | Match 5 = ☢️ Nuke!</div>
+
+    <div id="game-container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="end-card">
+        <div class="cta-title">UNSTOPPABLE! 💣☢️</div>
+        <div class="cta-subtitle">Can you master all levels? Play Now!</div>
+        <button class="cta-btn" onclick="triggerCTA()">INSTALL NOW</button>
+    </div>
+
+    <script>
+        const GRID_SIZE = 6;
+        const COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#a855f7'];
+        
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        
+        let board = [];
+        let moves = 7;
+        let score = 0;
+        let cellSize = 0;
+        let selectedTile = null;
+        let isAnimating = false;
+
+        // Custom Ease Out Quad for smooth motion
+        function easeOutQuad(t) { return t * (2 - t); }
+        function easeOutBounce(t) {
+            if (t < (1 / 2.75)) {
+                return 7.5625 * t * t;
+            } else if (t < (2 / 2.75)) {
+                return 7.5625 * (t -= (1.5 / 2.75)) * t + 0.75;
+            } else if (t < (2.5 / 2.75)) {
+                return 7.5625 * (t -= (2.25 / 2.75)) * t + 0.9375;
+            } else {
+                return 7.5625 * (t -= (2.625 / 2.75)) * t + 0.984375;
+            }
+        }
+
+        class Tile {
+            constructor(r, c, type = 'normal', color = COLORS[0]) {
+                this.r = r;
+                this.c = c;
+                this.type = type;
+                this.color = color;
+                
+                // Position and Animation State
+                this.x = c * cellSize;
+                this.y = r * cellSize;
+                this.targetX = this.x;
+                this.targetY = this.y;
+                this.scale = 1;
+                this.targetScale = 1;
+                this.alpha = 1;
+                this.targetAlpha = 1;
+            }
+
+            update(cellSize) {
+                this.x += (this.targetX - this.x) * 0.25;
+                this.y += (this.targetY - this.y) * 0.25;
+                this.scale += (this.targetScale - this.scale) * 0.25;
+                this.alpha += (this.targetAlpha - this.alpha) * 0.25;
+            }
+
+            draw(ctx, cellSize, isSelected) {
+                let size = cellSize * this.scale;
+                let offset = (cellSize - size) / 2;
+                let drawX = this.x + offset;
+                let drawY = this.y + offset;
+
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, this.alpha);
+
+                if (isSelected) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(this.c * cellSize + 4, this.r * cellSize + 4, cellSize - 8, cellSize - 8);
+                }
+
+                let padding = 8;
+                let radius = 12;
+
+                if (this.type === 'normal') {
+                    drawRoundedRect(ctx, drawX + padding, drawY + padding, size - padding * 2, size - padding * 2, radius, this.color);
+                } else if (this.type === 'grenade') {
+                    drawRoundedRect(ctx, drawX + padding, drawY + padding, size - padding * 2, size - padding * 2, radius, '#dc2626');
+                    ctx.font = `${size * 0.45}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('💣', drawX + size / 2, drawY + size / 2);
+                } else if (this.type === 'nuke') {
+                    drawRoundedRect(ctx, drawX + padding, drawY + padding, size - padding * 2, size - padding * 2, radius, '#eab308');
+                    ctx.font = `${size * 0.45}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('☢️', drawX + size / 2, drawY + size / 2);
+                }
+
+                ctx.restore();
+            }
+        }
+
+        function drawRoundedRect(ctx, x, y, w, h, r, color) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(x, y, w, h, r);
+            ctx.fill();
+        }
+
+        function init() {
+            let containerWidth = document.getElementById('game-container').clientWidth - 32;
+            let containerHeight = document.getElementById('game-container').clientHeight - 32;
+            let size = Math.min(containerWidth, containerHeight, 400);
+            
+            canvas.width = size;
+            canvas.height = size;
+            cellSize = size / GRID_SIZE;
+
+            createBoard();
+            gameLoop();
+
+            canvas.addEventListener('pointerdown', handleInput);
+        }
+
+        function createBoard() {
+            for (let r = 0; r < GRID_SIZE; r++) {
+                board[r] = [];
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    let colorIndex = Math.floor(Math.random() * COLORS.length);
+                    board[r][c] = new Tile(r, c, 'normal', COLORS[colorIndex]);
+                }
+            }
+
+            // Guaranteed setup for Match-4 & Special Combos
+            board[2][0] = new Tile(2, 0, 'normal', COLORS[0]);
+            board[2][1] = new Tile(2, 1, 'normal', COLORS[0]);
+            board[2][2] = new Tile(2, 2, 'normal', COLORS[0]);
+            board[2][4] = new Tile(2, 4, 'normal', COLORS[0]);
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Background Grid
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    ctx.fillStyle = (r + c) % 2 === 0 ? '#334155' : '#1e293b';
+                    ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+                }
+            }
+
+            // Update & Render Tiles
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    let tile = board[r][c];
+                    if (tile) {
+                        tile.update(cellSize);
+                        let isSel = selectedTile && selectedTile.r === r && selectedTile.c === c;
+                        tile.draw(ctx, cellSize, isSel);
+                    }
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function handleInput(e) {
+            if (isAnimating || moves <= 0) return;
+
+            let rect = canvas.getBoundingClientRect();
+            let c = Math.floor((e.clientX - rect.left) / cellSize);
+            let r = Math.floor((e.clientY - rect.top) / cellSize);
+
+            if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) return;
+
+            if (!selectedTile) {
+                selectedTile = { r, c };
+            } else {
+                let rDiff = Math.abs(selectedTile.r - r);
+                let cDiff = Math.abs(selectedTile.c - c);
+
+                if ((rDiff === 1 && cDiff === 0) || (rDiff === 0 && cDiff === 1)) {
+                    animateSwap(selectedTile.r, selectedTile.c, r, c);
+                    selectedTile = null;
+                } else {
+                    selectedTile = { r, c };
+                }
+            }
+        }
+
+        function animateSwap(r1, c1, r2, c2) {
+            isAnimating = true;
+
+            let tile1 = board[r1][c1];
+            let tile2 = board[r2][c2];
+
+            // Set targets for smooth tweening swap
+            tile1.targetX = c2 * cellSize;
+            tile1.targetY = r2 * cellSize;
+            tile1.r = r2; tile1.c = c2;
+
+            tile2.targetX = c1 * cellSize;
+            tile2.targetY = r1 * cellSize;
+            tile2.r = r1; tile2.c = c1;
+
+            board[r1][c1] = tile2;
+            board[r2][c2] = tile1;
+
+            setTimeout(() => {
+                // Check if Grenade or Nuke was swapped with ANY tile
+                if (tile1.type === 'grenade' || tile2.type === 'grenade' ||
+                    tile1.type === 'nuke' || tile2.type === 'nuke') {
+                    
+                    moves--;
+                    document.getElementById('moves-text').innerText = moves;
+                    
+                    if (tile1.type === 'grenade') triggerGrenade(tile1.r, tile1.c);
+                    if (tile2.type === 'grenade') triggerGrenade(tile2.r, tile2.c);
+                    if (tile1.type === 'nuke' || tile2.type === 'nuke') triggerNuke();
+
+                    processPostExplosion();
+                    return;
+                }
+
+                let matches = checkMatches();
+
+                if (matches.length > 0) {
+                    moves--;
+                    document.getElementById('moves-text').innerText = moves;
+                    processMatches(matches, r2, c2);
+                } else {
+                    // Revert Swap with Tween animation if valid match wasn't found
+                    tile1.targetX = c1 * cellSize;
+                    tile1.targetY = r1 * cellSize;
+                    tile1.r = r1; tile1.c = c1;
+
+                    tile2.targetX = c2 * cellSize;
+                    tile2.targetY = r2 * cellSize;
+                    tile2.r = r2; tile2.c = c2;
+
+                    board[r1][c1] = tile1;
+                    board[r2][c2] = tile2;
+
+                    setTimeout(() => { isAnimating = false; }, 250);
+                }
+            }, 250);
+        }
+
+        function checkMatches() {
+            let matched = [];
+
+            // Horizontal Matches
+            for (let r = 0; r < GRID_SIZE; r++) {
+                let matchLength = 1;
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    let checkNext = c < GRID_SIZE - 1 && board[r][c] && board[r][c+1] && 
+                                    board[r][c].color === board[r][c+1].color &&
+                                    board[r][c].type === 'normal';
+                    if (checkNext) {
+                        matchLength++;
+                    } else {
+                        if (matchLength >= 3) {
+                            let matchGroup = [];
+                            for (let i = 0; i < matchLength; i++) matchGroup.push({ r, c: c - i });
+                            matched.push(matchGroup);
+                        }
+                        matchLength = 1;
+                    }
+                }
+            }
+
+            // Vertical Matches
+            for (let c = 0; c < GRID_SIZE; c++) {
+                let matchLength = 1;
+                for (let r = 0; r < GRID_SIZE; r++) {
+                    let checkNext = r < GRID_SIZE - 1 && board[r][c] && board[r+1][c] && 
+                                    board[r][c].color === board[r+1][c].color &&
+                                    board[r][c].type === 'normal';
+                    if (checkNext) {
+                        matchLength++;
+                    } else {
+                        if (matchLength >= 3) {
+                            let matchGroup = [];
+                            for (let i = 0; i < matchLength; i++) matchGroup.push({ r: r - i, c });
+                            matched.push(matchGroup);
+                        }
+                        matchLength = 1;
+                    }
+                }
+            }
+
+            return matched;
+        }
+
+        function processMatches(matchGroups, targetR, targetC) {
+            let specialToSpawn = null;
+
+            matchGroups.forEach(group => {
+                score += group.length * 100;
+                
+                if (group.length === 4) {
+                    specialToSpawn = { r: targetR, c: targetC, type: 'grenade' };
+                } else if (group.length >= 5) {
+                    specialToSpawn = { r: targetR, c: targetC, type: 'nuke' };
+                }
+
+                group.forEach(coord => {
+                    let tile = board[coord.r][coord.c];
+                    if (tile) {
+                        tile.targetScale = 0;
+                        tile.targetAlpha = 0;
+                    }
+                });
+            });
+
+            document.getElementById('score-text').innerText = score;
+
+            setTimeout(() => {
+                matchGroups.forEach(group => {
+                    group.forEach(coord => { board[coord.r][coord.c] = null; });
+                });
+
+                if (specialToSpawn) {
+                    let tile = new Tile(specialToSpawn.r, specialToSpawn.c, specialToSpawn.type, '#ffffff');
+                    tile.scale = 0;
+                    tile.targetScale = 1;
+                    board[specialToSpawn.r][specialToSpawn.c] = tile;
+                }
+
+                processPostExplosion();
+            }, 250);
+        }
+
+        function triggerGrenade(r, c) {
+            score += 500;
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    let nr = r + dr;
+                    let nc = c + dc;
+                    if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE && board[nr][nc]) {
+                        board[nr][nc].targetScale = 0;
+                        board[nr][nc].targetAlpha = 0;
+                    }
+                }
+            }
+        }
+
+        function triggerNuke() {
+            score += 2000;
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    if (board[r][c]) {
+                        board[r][c].targetScale = 0;
+                        board[r][c].targetAlpha = 0;
+                    }
+                }
+            }
+        }
+
+        function processPostExplosion() {
+            document.getElementById('score-text').innerText = score;
+
+            setTimeout(() => {
+                for (let r = 0; r < GRID_SIZE; r++) {
+                    for (let c = 0; c < GRID_SIZE; c++) {
+                        if (board[r][c] && board[r][c].targetScale === 0) {
+                            board[r][c] = null;
+                        }
+                    }
+                }
+                applyGravity();
+            }, 250);
+        }
+
+        function applyGravity() {
+            for (let c = 0; c < GRID_SIZE; c++) {
+                let emptyRow = GRID_SIZE - 1;
+                for (let r = GRID_SIZE - 1; r >= 0; r--) {
+                    if (board[r][c] !== null) {
+                        let tile = board[r][c];
+                        board[emptyRow][c] = tile;
+                        if (emptyRow !== r) {
+                            board[r][c] = null;
+                        }
+                        tile.r = emptyRow;
+                        tile.c = c;
+                        tile.targetY = emptyRow * cellSize;
+                        emptyRow--;
+                    }
+                }
+
+                // Drop down new tiles from top
+                for (let r = emptyRow; r >= 0; r--) {
+                    let colorIndex = Math.floor(Math.random() * COLORS.length);
+                    let tile = new Tile(r, c, 'normal', COLORS[colorIndex]);
+                    tile.y = -cellSize * (emptyRow - r + 1); // Start offscreen top
+                    tile.targetY = r * cellSize;
+                    board[r][c] = tile;
+                }
+            }
+
+            setTimeout(() => {
+                if (moves <= 0) {
+                    showEndCard();
+                } else {
+                    isAnimating = false;
+                }
+            }, 350);
+        }
+
+        function showEndCard() {
+            let endCard = document.getElementById('end-card');
+            endCard.classList.add('active');
+        }
+
+        function triggerCTA() {
+            if (window.mraid) {
+                window.mraid.open("https://apps.apple.com/tr/app/bbod/id6756983548?l=tr");
+            } else {
+                window.open("https://apps.apple.com/tr/app/bbod/id6756983548?l=tr", "_blank");
+            }
+        }
+
+        window.onload = init;
+        window.onresize = init;
+    </script>
+</body>
+</html>
